@@ -5,3 +5,5 @@ __pycache__/
 .env
 .env.local
 .DS_Store
+.claude/Skills/
+.claude/Skills/

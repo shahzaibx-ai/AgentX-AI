@@ -1,0 +1,26 @@
+/* Voice mode animations (used via Tailwind arbitrary animate-[…] classes). */
+@keyframes voice-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 16px transparent;
+  }
+}
+
+@keyframes voice-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes voice-caret {
+  to {
+    visibility: hidden;
+  }
+}

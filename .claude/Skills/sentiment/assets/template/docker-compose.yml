@@ -1,0 +1,36 @@
+# docker compose up --build    → web http://localhost:3000, API http://localhost:8000
+services:
+  api:
+    build: ./api
+    env_file:
+      - path: ./api/.env
+        required: false
+    environment:
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    volumes:
+      - models:/models # Hugging Face cache: models download once and survive rebuilds
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # NVIDIA GPU (needs the NVIDIA Container Toolkit): uncomment
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  web:
+    build:
+      context: ./web
+      args:
+        API_URL: http://api:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  models:

@@ -1,0 +1,39 @@
+services:
+  api:
+    build: ./api
+    env_file: ./api/.env
+    environment:
+      # Reach Ollama running on the host machine
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      args:
+        API_URL: http://api:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # Optional: run Ollama in Docker instead of on the host.
+  #   docker compose --profile ollama up
+  #   then set OLLAMA_HOST=http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+volumes:
+  ollama:

@@ -1,0 +1,108 @@
+# ==============================
+# Python
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / build output
+build/
+dist/
+wheels/
+sdist/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+
+# ==============================
+# Virtual environments (uv creates .venv automatically)
+# ==============================
+.venv/
+venv/
+env/
+ENV/
+
+# ==============================
+# Secrets & environment files
+# ==============================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials.json
+service-account*.json
+
+# ==============================
+# Testing & coverage
+# ==============================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.tox/
+.nox/
+.hypothesis/
+
+# ==============================
+# Linters & type checkers
+# ==============================
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.pytype/
+.dmypy.json
+dmypy.json
+
+# ==============================
+# Logs & runtime data
+# ==============================
+logs/
+*.log
+*.pid
+*.sqlite3
+*.db
+tmp/
+temp/
+
+# ==============================
+# Jupyter
+# ==============================
+.ipynb_checkpoints/
+
+# ==============================
+# IDEs & editors
+# ==============================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ==============================
+# OS files
+# ==============================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*

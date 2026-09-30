@@ -1,0 +1,41 @@
+[project]
+name = "agentx-ai-agent"
+version = "1.0.0"
+description = "LiveKit voice agent for the AI Assistant. Answers come from the app's API, so model choice and fallback match text chat."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "livekit-agents>=1.8.3",
+    "livekit-plugins-ai-coustics>=0.3.2",
+    "pydantic-settings>=2.15",
+    "python-dotenv>=1.1",
+    "httpx>=0.28",
+    "livekit-api>=1.2.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "pytest-asyncio>=1.2",
+    "ruff>=0.16",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "ASYNC", "RUF", "PL"]
+ignore = ["PLR0913", "PLR2004"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q"

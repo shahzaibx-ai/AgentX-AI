@@ -12,13 +12,13 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")  # LiveKit reads LIVEKIT_URL / _API_KEY / _API_SECRET from the environment
 
-import asyncio  # noqa: E402
-import json  # noqa: E402
-import logging  # noqa: E402
-from typing import Any  # noqa: E402
+import asyncio
+import json
+import logging
+from typing import Any
 
-from livekit import agents, rtc  # noqa: E402
-from livekit.agents import (  # noqa: E402
+from livekit import agents, rtc
+from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
@@ -27,23 +27,28 @@ from livekit.agents import (  # noqa: E402
     llm,
     room_io,
 )
-from livekit.plugins import ai_coustics  # noqa: E402
+from livekit.plugins import ai_coustics
 
-from app_llm import AppLLM  # noqa: E402
-from settings import AgentSettings, get_settings  # noqa: E402
+from app_llm import AppLLM
+from settings import AgentSettings, get_settings
 
 logger = logging.getLogger("voice-agent")
 settings = get_settings()
 server = AgentServer()
 
-
 class Assistant(Agent):
     def __init__(self, instructions: str) -> None:
         super().__init__(instructions=instructions)
 
+class DictationAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(instructions="You are a dictation agent. Only transcribe user speech.")
+    
+    async def on_user_turn_completed(self, _ctx: Any, _turn: Any) -> None:
+        # Prevent any agent replies in dictation mode
+        raise agents.StopResponse()
 
 def parse_dispatch_metadata(raw: str | None) -> dict[str, Any]:
-    """Metadata the API attached to the dispatch, e.g. {"voice": "<tts voice id>"}."""
     try:
         data = json.loads(raw or "{}")
     except json.JSONDecodeError:
@@ -51,14 +56,7 @@ def parse_dispatch_metadata(raw: str | None) -> dict[str, Any]:
         return {}
     return data if isinstance(data, dict) else {}
 
-
 class RoomAttributes:
-    """Publishes reply details as agent attributes so the web UI can show them.
-
-    assistant.model / assistant.provider / assistant.local: who is answering.
-    assistant.notice: why a fallback model was used.  assistant.error: last failure.
-    """
-
     def __init__(self, room: rtc.Room) -> None:
         self._room = room
         self._tasks: set[asyncio.Task[None]] = set()
@@ -88,7 +86,6 @@ class RoomAttributes:
     def on_error(self, message: str) -> None:
         self.set({"assistant.error": message[:300]})
 
-
 def build_llm(config: AgentSettings, room_name: str, attributes: RoomAttributes) -> llm.LLM:
     if config.voice_llm == "app":
         return AppLLM(
@@ -101,8 +98,9 @@ def build_llm(config: AgentSettings, room_name: str, attributes: RoomAttributes)
         )
     return inference.LLM(model=config.voice_llm)
 
-
-def build_room_options(config: AgentSettings) -> room_io.RoomOptions:
+def build_room_options(config: AgentSettings, mode: str = "chat") -> room_io.RoomOptions:
+    if mode == "dictation":
+        return room_io.RoomOptions() # Disable noise cancellation/ai_coustics for dictation
     if not config.voice_noise_cancellation:
         return room_io.RoomOptions()
     return room_io.RoomOptions(
@@ -113,43 +111,57 @@ def build_room_options(config: AgentSettings) -> room_io.RoomOptions:
         ),
     )
 
-
 @server.rtc_session(agent_name=settings.voice_agent_name)
 async def voice_session(ctx: agents.JobContext) -> None:
     metadata = parse_dispatch_metadata(ctx.job.metadata)
+    mode = metadata.get("mode", "chat")
     attributes = RoomAttributes(ctx.room)
     room_name = ctx.job.room.name
 
-    session = AgentSession(
-        stt=inference.STT(model=settings.voice_stt_model, language=settings.voice_stt_language),
-        llm=build_llm(settings, room_name, attributes),
-        tts=inference.TTS(
-            model=settings.voice_tts_model,
-            voice=metadata.get("voice") or settings.voice_tts_voice,
-        ),
-        turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
-    )
+    if mode == "dictation":
+        # STT only
+        session = AgentSession(
+            stt=inference.STT(model=settings.voice_stt_model, language=settings.voice_stt_language),
+            llm=None,
+            tts=None,
+            turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
+        )
+        agent = DictationAgent()
+        room_options = build_room_options(settings, mode="dictation")
+    else:
+        # Chat mode
+        session = AgentSession(
+            stt=inference.STT(model=settings.voice_stt_model, language=settings.voice_stt_language),
+            llm=build_llm(settings, room_name, attributes),
+            tts=inference.TTS(
+                model=settings.voice_tts_model,
+                voice=metadata.get("voice") or settings.voice_tts_voice,
+            ),
+            turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
+        )
+        agent = Assistant(settings.voice_instructions)
+        room_options = build_room_options(settings)
 
     await session.start(
         room=ctx.room,
-        agent=Assistant(settings.voice_instructions),
-        room_options=build_room_options(settings),
+        agent=agent,
+        room_options=room_options,
     )
 
-    # The web app's Stop button: cut the current reply short.
-    async def interrupt(_: rtc.RpcInvocationData) -> str:
-        try:
-            session.interrupt()
-        except RuntimeError:
-            logger.debug("nothing to interrupt")
-        return "ok"
+    if mode != "dictation":
+        # Only register interrupt for chat mode
+        async def interrupt(_: rtc.RpcInvocationData) -> str:
+            try:
+                session.interrupt()
+            except RuntimeError:
+                logger.debug("nothing to interrupt")
+            return "ok"
+        ctx.room.local_participant.register_rpc_method("interrupt", interrupt)
+        
+        if settings.voice_greeting:
+            session.say(settings.voice_greeting)
 
-    ctx.room.local_participant.register_rpc_method("interrupt", interrupt)
-    logger.info("voice session started in %s", room_name)
-
-    if settings.voice_greeting:
-        session.say(settings.voice_greeting)
-
+    logger.info("voice session started in %s mode=%s", room_name, mode)
 
 if __name__ == "__main__":
     agents.cli.run_app(server)

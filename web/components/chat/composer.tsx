@@ -10,7 +10,8 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ArrowUpIcon, CameraIcon, ImageIcon, MicIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, CameraIcon, ImageIcon, MicIcon, PlusIcon, SquareIcon, XIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { AttachmentTray } from "@/components/photos/attachment-tray";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { APP_CONFIG } from "@/lib/config";
 import { ACCEPT_ATTR } from "@/lib/images";
 import type { ChatImage } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useRecorder } from "@/hooks/use-recorder";
 
 export const Composer = forwardRef(({
   onSend,
@@ -41,12 +43,9 @@ export const Composer = forwardRef(({
 }: {
   onSend: (text: string, images: ChatImage[]) => void;
   onStop: () => void;
-  /** Enables the + menu, the photo tray and sending photos. */
   attachments?: UseAttachments;
   photoLimit?: number;
-  /** Shown above the input, e.g. "llama3.2 can't see images". */
   notice?: ReactNode;
-  /** Sending is not possible right now (the notice says why). */
   blocked?: boolean;
   streaming: boolean;
   disabled?: boolean;
@@ -58,52 +57,34 @@ export const Composer = forwardRef(({
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [coarse, setCoarse] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-
-  useImperativeHandle(ref, () => ({
-    quote: (text: string) => {
-      const quote = `> ${text}\n`;
-      setValue((prev) => prev + quote);
-      internalRef.current?.focus();
-    },
-  }));
+  const { state: recState, levels, seconds, start, stop, cancel } = useRecorder();
+  const dictationBaseRef = useRef<string>("");
+  const cancelRef = useRef(cancel);
 
   useEffect(() => {
-    if (autoFocus && window.matchMedia("(min-width: 768px)").matches) internalRef.current?.focus();
-    setCoarse(window.matchMedia("(pointer: coarse)").matches);
-  }, [autoFocus]);
+    cancelRef.current = cancel;
+  }, [cancel]);
 
-  const toggleListening = () => {
-    if (isListening) {
-      window.speechRecognition?.stop();
-      return;
-    }
+  useEffect(() => {
+    return () => {
+      cancelRef.current();
+    };
+  }, []);
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error("Speech recognition is not supported in this browser.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = (event: any) => {
-      if (event.error !== "no-speech") {
-        console.error("Speech recognition error", event.error);
+  const handleToggleMic = async () => {
+    if (recState === "idle") {
+      dictationBaseRef.current = value;
+      start();
+    } else {
+      const text = await stop();
+      if (text) {
+        setValue((prev) => {
+          const base = dictationBaseRef.current;
+          return base && text ? `${base} ${text}` : base || text;
+        });
+        internalRef.current?.focus();
       }
-      setIsListening(false);
-    };
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setValue((prev) => (prev ? `${prev} ${transcript}` : transcript));
-    };
-
-    recognition.start();
+    }
   };
 
   const photoCount = attachments?.items.length ?? 0;
@@ -113,6 +94,9 @@ export const Composer = forwardRef(({
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (streaming) return onStop();
+    if (recState !== "idle") {
+      cancelRef.current();
+    }
     if (!hasContent || disabled || processing || blocked) return;
     onSend(value, attachments?.takeAll() ?? []);
     setValue("");
@@ -136,12 +120,17 @@ export const Composer = forwardRef(({
   const voiceDisabled = disabled || streaming || blocked;
 
   const pick = (input: HTMLInputElement | null) => {
-    // Let the menu close and return focus first, or some browsers ignore the click.
     requestAnimationFrame(() => input?.click());
   };
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.length) attachments?.add([...e.target.files]);
     e.target.value = "";
+  };
+
+  const formatTime = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   return (
@@ -154,17 +143,58 @@ export const Composer = forwardRef(({
       <label htmlFor="composer" className="sr-only">
         Message
       </label>
-      <textarea
-        id="composer"
-        ref={internalRef}
-        rows={1}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        enterKeyHint="send"
-        className="field-sizing-content max-h-52 min-h-7 w-full resize-none bg-transparent py-1.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
-      />
+
+      {recState === "idle" ? (
+        <textarea
+          id="composer"
+          ref={internalRef}
+          rows={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          enterKeyHint="send"
+          className="field-sizing-content max-h-52 min-h-7 w-full resize-none bg-transparent py-1.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
+        />
+      ) : (
+        <div className="flex items-center gap-3 py-2 px-1">
+          <Button type="button" variant="ghost" size="icon" className="size-8 rounded-full" onClick={cancel}>
+            <XIcon className="size-4" />
+          </Button>
+          <div className="flex-1 flex items-center gap-1 h-6">
+            {recState === "recording" ? (
+              <div className="flex items-center gap-[2px] h-full">
+                {levels.map((l, i) => (
+                  <div
+                    key={i}
+                    className="w-[3px] rounded-full bg-foreground transition-[height] duration-75"
+                    style={{ height: `${4 + l * 24}px` }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircleIcon className="size-4 animate-spin" />
+                <span>Transcribing…</span>
+              </div>
+            )}
+          </div>
+          <div className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+            {formatTime(seconds)}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-full"
+            onClick={handleToggleMic}
+            disabled={recState === "transcribing"}
+          >
+            <CheckIcon className="size-4" />
+          </Button>
+        </div>
+      )}
+
       <div className="mt-1 flex items-center gap-2">
         {attachments && (
           <>
@@ -200,9 +230,7 @@ export const Composer = forwardRef(({
                   <CameraIcon className="mt-0.5" />
                   <span className="flex flex-col">
                     <span>Take a photo</span>
-                    <span className="text-xs text-muted-foreground">
-                      {coarse ? "Opens your camera" : "Uses your camera on phones and tablets"}
-                    </span>
+                    <span className="text-xs text-muted-foreground">Saves photos to your library</span>
                   </span>
                 </DropdownMenuItem>
                 <p className="px-2 pt-1 pb-1.5 text-xs text-muted-foreground">
@@ -243,13 +271,13 @@ export const Composer = forwardRef(({
               size="icon"
               aria-label="Voice prompt"
               disabled={voiceDisabled}
-              onClick={toggleListening}
-              className={cn("rounded-full transition-colors", isListening && "text-destructive bg-destructive/10")}
+              onClick={handleToggleMic}
+              className={cn("rounded-full transition-colors", recState === "recording" && "text-destructive bg-destructive/10")}
             >
-              <MicIcon className={cn("size-4", isListening && "animate-pulse")} />
+              {recState === "recording" ? <MicIcon className="size-4 animate-pulse" /> : <MicIcon className="size-4" />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Voice prompt</TooltipContent>
+          <TooltipContent>{recState === "recording" ? "Stop dictation" : "Voice prompt"}</TooltipContent>
         </Tooltip>
         <Button
           type="submit"

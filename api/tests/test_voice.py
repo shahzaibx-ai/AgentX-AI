@@ -118,7 +118,24 @@ def test_session_returns_token_that_dispatches_the_agent():
     assert claims.video.room == body["room_name"]
     (dispatch,) = claims.room_config.agents
     assert dispatch.agent_name == "my-agent"
-    assert json.loads(dispatch.metadata) == {"voice": "tts-calm-123"}
+    assert json.loads(dispatch.metadata) == {"voice": "tts-calm-123", "mode": "chat"}
+
+def test_session_dictation_mode_metadata():
+    client, _ = bare_client(**ENABLED)
+    res = client.post(
+        "/api/voice/session",
+        json={
+            "mode": "dictation",
+            "participant_name": "Dictator",
+        },
+    )
+    assert res.status_code == 201
+    body = res.json()
+    claims = api.TokenVerifier(KEY, SECRET).verify(body["participant_token"])
+    (dispatch,) = claims.room_config.agents
+    metadata = json.loads(dispatch.metadata)
+    assert metadata["mode"] == "dictation"
+    assert "voice" in metadata # voice should be None but key exists
 
 
 def test_session_rejects_unknown_voice():

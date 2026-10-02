@@ -38,35 +38,28 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
-
 def mount_voice(
     app: FastAPI,
     brain: Brain,
     settings: VoiceSettings | None = None,
     prefix: str = "/api/voice",
 ) -> None:
-    """Add the voice endpoints to `app`. Call once, when creating the app."""
     settings = settings or VoiceSettings()
     app.state.voice_settings = settings
     app.state.voice_store = VoiceContextStore(settings.voice_context_ttl_seconds)
     app.state.voice_brain = brain
     app.include_router(router, prefix=prefix)
 
-
 def _settings(request: Request) -> VoiceSettings:
     return request.app.state.voice_settings
-
 
 def _store(request: Request) -> VoiceContextStore:
     return request.app.state.voice_store
 
-
 SettingsDep = Annotated[VoiceSettings, Depends(_settings)]
 StoreDep = Annotated[VoiceContextStore, Depends(_store)]
 
-
 def _require_agent(request: Request, settings: SettingsDep) -> None:
-    """Only the voice agent may call /chat when VOICE_AGENT_TOKEN is set."""
     token = settings.voice_agent_token.get_secret_value() if settings.voice_agent_token else ""
     if not token:
         return
@@ -78,18 +71,14 @@ def _require_agent(request: Request, settings: SettingsDep) -> None:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
 router = APIRouter(tags=["voice"])
-
 
 def _sse(name: str, data: dict[str, Any]) -> str:
     payload = json.dumps(data, ensure_ascii=False)
     return f"data: {payload}\n\n" if name == "delta" else f"event: {name}\ndata: {payload}\n\n"
 
-
 @router.get("/config", response_model=VoiceConfigResponse)
 async def voice_config(settings: SettingsDep) -> VoiceConfigResponse:
-    """Whether voice mode is available, and the voices users can pick from."""
     return VoiceConfigResponse(
         enabled=settings.enabled,
         reason=None if settings.enabled else NOT_CONFIGURED,
@@ -99,12 +88,10 @@ async def voice_config(settings: SettingsDep) -> VoiceConfigResponse:
         ],
     )
 
-
 @router.post("/session", response_model=VoiceSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_voice_session(
     body: VoiceSessionRequest, settings: SettingsDep, store: StoreDep
 ) -> VoiceSessionResponse:
-    """Create a room for one voice conversation and a token that brings the agent in."""
     if not settings.enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, NOT_CONFIGURED)
 
@@ -124,21 +111,25 @@ async def create_voice_session(
             ),
         ),
     )
+    
+    agent_metadata = {"voice": voice.tts_voice if voice else None}
+    if body.mode == "dictation":
+        agent_metadata["mode"] = "dictation"
+
     token = create_participant_token(
         settings,
         room=room,
         identity=identity,
         name=(body.participant_name or "Guest").strip() or "Guest",
-        agent_metadata={"voice": voice.tts_voice if voice else None},
+        agent_metadata=agent_metadata,
     )
-    logger.info("Voice session created: room=%s provider=%s", room, body.provider or "auto")
+    logger.info("Voice session created: room=%s provider=%s mode=%s", room, body.provider or "auto", body.mode)
     return VoiceSessionResponse(
         server_url=settings.livekit_url,
         participant_token=token,
         room_name=room,
         participant_identity=identity,
     )
-
 
 @router.post(
     "/chat",
@@ -149,11 +140,6 @@ async def create_voice_session(
 async def voice_chat(
     body: VoiceChatRequest, request: Request, settings: SettingsDep, store: StoreDep
 ) -> StreamingResponse:
-    """Used by the voice agent. Streams the reply as server-sent events.
-
-    Adds the model the user picked and the earlier chat messages remembered for
-    this room. An unknown or expired room falls back to automatic model choice.
-    """
     context = store.get(body.room)
     try:
         messages = build_voice_messages(context, body.messages, settings.voice_max_messages)

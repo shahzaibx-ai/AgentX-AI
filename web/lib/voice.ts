@@ -103,6 +103,7 @@ export async function fetchVoiceConfig(signal?: AbortSignal): Promise<VoiceConfi
 }
 
 export interface CreateVoiceSessionInput {
+  mode?: "chat" | "dictation";
   selection: VoiceModelSelection;
   voice: string | null;
   participantName: string;
@@ -114,6 +115,8 @@ export async function createVoiceSession(input: CreateVoiceSessionInput): Promis
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      mode: input.mode,
+
       provider: input.selection?.provider ?? null,
       model: input.selection?.model ?? null,
       voice: input.voice,

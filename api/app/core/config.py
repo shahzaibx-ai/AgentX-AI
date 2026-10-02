@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = ""
 
+    groq_api_key: SecretStr | None = None
+    groq_base_url: str = "https://api.x.ai/v1"
+    groq_model: str = ""
+
     meta_api_key: SecretStr | None = None
     meta_base_url: str = "https://api.llama.com/compat/v1/"
     meta_model: str = ""

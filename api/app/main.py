@@ -15,6 +15,8 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.providers.registry import ProviderRegistry, build_providers
 from app.routes import chat, health, models
+from app.routes import stt
+
 from app.voice import VoiceSettings, mount_voice
 from app.voice_brain import chat_brain
 
@@ -52,7 +54,7 @@ def create_app(
     # Base64 adds a third; allow the photo budget plus room for the text.
     max_body = settings.max_images_per_request * settings.max_image_bytes * 4 // 3 + 8 * 1024 * 1024
     app.add_middleware(BodySizeLimit, max_bytes=max_body, paths=("/api/chat",))
-    for router in (health.router, models.router, chat.router):
+    for router in (health.router, models.router, chat.router, stt.router):
         app.include_router(router, prefix="/api")
     mount_voice(app, brain=chat_brain, settings=voice_settings)  # voice mode (LiveKit)
     return app

@@ -1,0 +1,45 @@
+[project]
+name = "ai-assistant-api"
+version = "1.0.0"
+description = "FastAPI backend for the AI Assistant: local Ollama models first, cloud providers as fallback."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.141",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.15",
+    "ollama>=0.6",
+    "openai>=3.19",
+    "anthropic>=1.8",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "pytest-asyncio>=1.2",
+    "ruff>=0.16",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "ASYNC", "RUF", "PL"]
+ignore = ["PLR0913", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q"

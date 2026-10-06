@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import {
   ImageIcon,
+  LibraryIcon,
+  PaperclipIcon,
   CheckIcon,
   EllipsisIcon,
   MonitorIcon,
@@ -15,6 +17,7 @@ import {
   MicIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +62,7 @@ export function AppSidebar({
   onClearAll,
   onCollapse,
   apiOnline,
+  showLibrary,
   onVoiceToggle,
   voiceEnabled,
 }: {
@@ -70,6 +74,7 @@ export function AppSidebar({
   onClearAll: () => void;
   onCollapse?: () => void;
   apiOnline: boolean;
+  showLibrary?: boolean;
   onVoiceToggle: () => void;
   voiceEnabled: boolean;
 }) {
@@ -98,6 +103,17 @@ export function AppSidebar({
           </span>
           {APP_CONFIG.appName}
         </div>
+        {showLibrary && (
+          <Button asChild variant="ghost" className="justify-start font-normal">
+            <Link href="/library">
+              <LibraryIcon />
+              Library
+              <span className="ml-auto rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                Owner
+              </span>
+            </Link>
+          </Button>
+        )}
         {onCollapse && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -169,6 +185,12 @@ export function AppSidebar({
                       {c.messages.some((m) => m.images?.length) && (
                         <ImageIcon
                           aria-label="Has photos"
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                        />
+                      )}
+                      {c.messages.some((m) => m.files?.length || m.collections?.length) && (
+                        <PaperclipIcon
+                          aria-label="Uses files"
                           className="size-3.5 shrink-0 text-muted-foreground"
                         />
                       )}

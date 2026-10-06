@@ -10,29 +10,76 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ArrowUpIcon, CameraIcon, ImageIcon, MicIcon, PlusIcon, SquareIcon, XIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  AudioLinesIcon,
+  CameraIcon,
+  ImageIcon,
+  LibraryIcon,
+  MicIcon,
+  PaperclipIcon,
+  PlusIcon,
+  SquareIcon,
+  XIcon,
+  CheckIcon,
+  LoaderCircleIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AttachmentTray } from "@/components/photos/attachment-tray";
+import { FileChip } from "@/components/files/file-chip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { UseAttachments } from "@/hooks/use-attachments";
+import type { PendingFile, UseChatFiles } from "@/hooks/use-chat-files";
 import { APP_CONFIG } from "@/lib/config";
 import { ACCEPT_ATTR } from "@/lib/images";
-import type { ChatImage } from "@/lib/types";
+import { formatSize, type CollectionInfo } from "@/lib/library";
+import type { CollectionRef, ChatImage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useRecorder } from "@/hooks/use-recorder";
+
+/** Files and the Library in the composer (only when the API has them on). */
+export interface ComposerFiles {
+  files: UseChatFiles;
+  onAdd: (files: File[]) => void;
+  accept: string;
+  perMessage: number;
+  maxBytes: number;
+  collections: CollectionInfo[];
+  selected: CollectionRef[];
+  onSelect: (collections: CollectionRef[]) => void;
+}
+
+function fileStatus(f: PendingFile): string {
+  switch (f.phase) {
+    case "uploading":
+      return `Uploading · ${Math.round(f.progress * 100)}%`;
+    case "indexing":
+      return "Reading the file…";
+    case "ready":
+      return `${formatSize(f.size)} · Ready`;
+    default:
+      return f.error ?? "Couldn't be added";
+  }
+}
 
 export const Composer = forwardRef(({
   onSend,
   onStop,
   attachments,
+  library,
   photoLimit,
   notice,
   blocked,
@@ -41,9 +88,11 @@ export const Composer = forwardRef(({
   placeholder = `Message ${APP_CONFIG.appName}…`,
   autoFocus,
 }: {
-  onSend: (text: string, images: ChatImage[]) => void;
+  /** The parent takes the photos and files from the trays. */
+  onSend: (text: string) => void;
   onStop: () => void;
   attachments?: UseAttachments;
+  library?: ComposerFiles;
   photoLimit?: number;
   notice?: ReactNode;
   blocked?: boolean;
@@ -55,6 +104,7 @@ export const Composer = forwardRef(({
   const [value, setValue] = useState("");
   const internalRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const docInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [coarse, setCoarse] = useState(false);
   const { state: recState, levels, seconds, start, stop, cancel } = useRecorder();
@@ -88,8 +138,11 @@ export const Composer = forwardRef(({
   };
 
   const photoCount = attachments?.items.length ?? 0;
-  const processing = !!attachments?.processing;
-  const hasContent = !!value.trim() || photoCount > 0;
+  const files = library?.files.items ?? [];
+  const readyFiles = files.filter((f) => f.phase === "ready").length;
+  const filesBusy = !!library?.files.busy;
+  const processing = !!attachments?.processing || filesBusy;
+  const hasContent = !!value.trim() || photoCount > 0 || readyFiles > 0;
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -98,7 +151,7 @@ export const Composer = forwardRef(({
       cancelRef.current();
     }
     if (!hasContent || disabled || processing || blocked) return;
-    onSend(value, attachments?.takeAll() ?? []);
+    onSend(value);
     setValue("");
   };
 
@@ -113,9 +166,19 @@ export const Composer = forwardRef(({
   const canSend = streaming || (hasContent && !disabled && !processing && !blocked);
   const sendLabel = streaming
     ? "Stop generating"
-    : processing
-      ? "Waiting for photos to be ready"
-      : "Send message";
+    : filesBusy
+      ? "Waiting for files to be ready"
+      : processing
+        ? "Waiting for photos to be ready"
+        : "Send message";
+  const selected = library?.selected ?? [];
+  const isSelected = (id: string) => selected.some((c) => c.id === id);
+  const toggle = (c: CollectionInfo) =>
+    library?.onSelect(
+      isSelected(c.id)
+        ? selected.filter((x) => x.id !== c.id)
+        : [...selected, { id: c.id, name: c.name }],
+    );
 
   const voiceDisabled = disabled || streaming || blocked;
 
@@ -124,6 +187,10 @@ export const Composer = forwardRef(({
   };
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.length) attachments?.add([...e.target.files]);
+    e.target.value = "";
+  };
+  const onDocs = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.length) library?.onAdd([...e.target.files]);
     e.target.value = "";
   };
 
@@ -140,6 +207,43 @@ export const Composer = forwardRef(({
     >
       {notice}
       {attachments && <AttachmentTray attachments={attachments} />}
+      {files.length > 0 && (
+        <ul className="mb-2 flex gap-2.5 overflow-x-auto pt-1.5 pb-1" aria-label="Files to send">
+          {files.map((f) => (
+            <li key={f.key}>
+              <FileChip
+                name={f.name}
+                ext={f.ext}
+                sub={fileStatus(f)}
+                progress={f.phase === "uploading" ? f.progress : undefined}
+                tone={f.phase === "failed" ? "error" : "default"}
+                onRemove={() => library?.files.remove(f.key)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      {selected.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5" aria-label="Library collections to search">
+          {selected.map((c) => (
+            <span
+              key={c.id}
+              className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-muted/60 pr-1 pl-2.5 text-xs font-medium"
+            >
+              <LibraryIcon className="size-3.5 text-muted-foreground" />
+              Searching {c.name}
+              <button
+                type="button"
+                aria-label={`Stop searching ${c.name}`}
+                onClick={() => library?.onSelect(selected.filter((x) => x.id !== c.id))}
+                className="grid size-5 place-items-center rounded-full outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <label htmlFor="composer" className="sr-only">
         Message
       </label>
@@ -206,7 +310,7 @@ export const Composer = forwardRef(({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label="Add photos"
+                      aria-label={library ? "Add photos and files" : "Add photos"}
                       disabled={disabled}
                       className="-ml-2 rounded-full text-muted-foreground hover:text-foreground"
                     >
@@ -214,10 +318,61 @@ export const Composer = forwardRef(({
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent>Add photos</TooltipContent>
+                <TooltipContent>{library ? "Add photos and files" : "Add photos"}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="start" side="top" className="w-72">
-                <DropdownMenuItem onSelect={() => pick(fileInput.current)} className="items-start">
+                {library && (
+                  <>
+                    <DropdownMenuItem onSelect={() => pick(docInput.current)} className="items-start">
+                      <PaperclipIcon className="mt-0.5" />
+                      <span className="flex flex-col">
+                        <span>Add files</span>
+                        <span className="text-xs text-muted-foreground">
+                          PDF, Word, Excel, text, code · up to {library.perMessage},{" "}
+                          {formatSize(library.maxBytes)} each
+                        </span>
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="items-start">
+                        <LibraryIcon className="mt-0.5" />
+                        <span className="flex flex-col">
+                          <span>Search Library</span>
+                          <span className="text-xs text-muted-foreground">
+                            {library.collections.length
+                              ? "Answer from shared documents"
+                              : "No collections yet"}
+                          </span>
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-64">
+                        {library.collections.length ? (
+                          library.collections.map((c) => (
+                            <DropdownMenuCheckboxItem
+                              key={c.id}
+                              checked={isSelected(c.id)}
+                              onCheckedChange={() => toggle(c)}
+                              onSelect={(e) => e.preventDefault()}
+                            >
+                              <span className="flex min-w-0 flex-col">
+                                <span className="truncate">{c.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {c.documents} {c.documents === 1 ? "document" : "documents"}
+                                </span>
+                              </span>
+                            </DropdownMenuCheckboxItem>
+                          ))
+                        ) : (
+                          <p className="px-2 py-2 text-xs text-muted-foreground">
+                            Library owners add collections on the Library page.
+                          </p>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                 <DropdownMenuItem onSelect={() => pick(fileInput.current)} className="items-start">
                   <ImageIcon className="mt-0.5" />
                   <span className="flex flex-col">
                     <span>Add photos</span>
@@ -234,7 +389,7 @@ export const Composer = forwardRef(({
                   </span>
                 </DropdownMenuItem>
                 <p className="px-2 pt-1 pb-1.5 text-xs text-muted-foreground">
-                  You can also paste or drop photos.
+                  {library ? "You can also paste photos or drop files." : "You can also paste or drop photos."}
                 </p>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -247,6 +402,17 @@ export const Composer = forwardRef(({
               onChange={onFiles}
               data-testid="photo-input"
             />
+            {library && (
+              <input
+                ref={docInput}
+                type="file"
+                accept={library.accept}
+                multiple
+                hidden
+                onChange={onDocs}
+                data-testid="file-input"
+              />
+            )}
             <input
               ref={cameraInput}
               type="file"

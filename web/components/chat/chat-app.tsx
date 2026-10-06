@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CloudIcon, LockIcon, PanelLeftIcon, SquarePenIcon } from "lucide-react";
+import { CloudIcon, LibraryIcon, LockIcon, PanelLeftIcon, SquarePenIcon } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
+import { uid } from "@/lib/helpers";
+import { useChatFiles } from "@/hooks/use-chat-files";
+import { useLibraryConfig } from "@/hooks/use-library-config";
 
 import { AppSidebar } from "@/components/chat/app-sidebar";
-import { Composer } from "@/components/chat/composer";
+import { Composer, type ComposerFiles } from "@/components/chat/composer";
 import { EmptyState, SuggestionGrid } from "@/components/chat/empty-state";
 import { MessageList } from "@/components/chat/message-list";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -38,7 +41,6 @@ export function ChatApp() {
   const attachments = useAttachments(limits);
   const composerRef = useRef<{ quote: (text: string) => void }>(null);
 
-  // ---- photos: which model will look at them ----
   const chosen: ModelInfo | null = models.selection ? models.effective : null; // null = Auto
   const visionDefault = models.data?.default_vision ?? null;
   const canSee = chosen ? !!chosen.vision : !!visionDefault;
@@ -53,6 +55,22 @@ export function ChatApp() {
     [models.data, canSee, limits.per_request, limits.per_message, limits.max_bytes],
   );
   const chat = useChat(models.selection, imagePolicy);
+
+  // ---- files and the Library ----
+  const library = useLibraryConfig();
+  const fileLimits = library.config?.limits ?? null;
+  const chatFiles = useChatFiles(library.enabled ? fileLimits : null);
+  // Files are uploaded before a new chat exists, under the id it will get.
+  const [draftId, setDraftId] = useState(uid);
+  const [draftCollections, setDraftCollections] = useState<CollectionRef[]>([]);
+  const chatId = chat.active?.id ?? draftId;
+  const collections = chat.active ? (chat.active.collections ?? []) : draftCollections;
+  const selectCollections = (next: CollectionRef[]) =>
+    chat.active ? chat.setCollections(chat.active.id, next) : setDraftCollections(next);
+  const addFiles = (files: File[]) => chatFiles.add(files, chatId);
+  const chatHasFiles = !!chat.active?.messages.some((m) => m.files?.length);
+  const usesLibrary =
+    library.enabled && (collections.length > 0 || chatFiles.items.length > 0 || chatHasFiles);
   const [sidebarOpen, setSidebarOpen] = useState(true); // desktop
   const [mobileOpen, setMobileOpen] = useState(false); // mobile sheet
   const [voiceOpen, setVoiceOpen] = useState(false); // voice mode active
@@ -144,11 +162,23 @@ export function ChatApp() {
       "AI can make mistakes. Check important information."
     );
 
-  // A suggestion is sent like typed text, with any photos in the tray.
-  const sendSuggestion = (text: string) => {
-    if (blocked || attachments.processing || chat.streaming) return;
-    chat.send(text, attachments.takeAll());
+  const send = (text: string) => {
+    const isNew = !chat.active;
+    chat.send(text, {
+      images: attachments.takeAll(),
+      files: chatFiles.takeReady(),
+      collections,
+      ...(isNew ? { newChatId: draftId } : {}),
+    });
+    if (isNew) {
+      setDraftId(uid());
+      setDraftCollections([]);
+    }
   };
+
+  const sendSuggestion = useCallback((text: string) => {
+    send(text);
+  }, [send]);
 
   const newChat = useCallback(() => {
     chat.newChat();
@@ -209,9 +239,19 @@ export function ChatApp() {
   const composer = (
     <Composer
       ref={composerRef}
-      onSend={chat.send}
+      onSend={send}
       onStop={chat.stop}
       attachments={attachments}
+      library={{
+        files: chatFiles,
+        onAdd: addFiles,
+        accept: fileLimits?.extensions.join(",") ?? "",
+        perMessage: fileLimits?.chat_files_per_message ?? 10,
+        maxBytes: fileLimits?.chat_file_max_bytes ?? 25 * 1024 * 1024,
+        collections: library.config?.collections ?? [],
+        selected: collections,
+        onSelect: selectCollections,
+      }}
       photoLimit={limits.per_message}
       notice={notice}
       blocked={blocked}

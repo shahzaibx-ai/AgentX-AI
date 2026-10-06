@@ -7,3 +7,6 @@ __pycache__/
 
 # Library originals and database (LIBRARY_DATA_DIR)
 data/
+# API keys and imported data
+api_keys.txt
+import_data/
